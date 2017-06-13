@@ -88,6 +88,16 @@ void button_clicked() {
 }
 
 void data_updated(void *argument) {
+    if (argument) {
+        M2MResource::M2MExecuteParameter* param = (M2MResource::M2MExecuteParameter*)argument;
+        String object_name = param->get_argument_object_name();
+        uint16_t object_instance_id = param->get_argument_object_instance_id();
+        String resource_name = param->get_argument_resource_name();
+        int payload_length = param->get_argument_value_length();
+        const uint8_t* payload = param->get_argument_value();
+        printf("Resource: %s/%d/%s executed\n", object_name.c_str(), object_instance_id, resource_name.c_str());
+        printf("Payload: %.*s\n", payload_length, payload);
+    }
     new_data = true;
     updates.release();
 }
@@ -177,9 +187,8 @@ public:
         blink_args->clear();
 
         // values in mbed Client are all buffers, and we need a vector of int's
-        uint8_t* buffIn = NULL;
-        uint32_t sizeIn;
-        res->get_value(buffIn, sizeIn);
+        uint8_t* buffIn = res->value();
+        uint32_t sizeIn = res->value_length();
 
         // turn the buffer into a string, and initialize a vector<int> on the heap
         printf("led_execute_callback pattern=%s\n", buffIn);
@@ -202,8 +211,6 @@ public:
         if (start < index) {
             blink_args->blink_pattern.push_back(mem_atoi((const char*)&buffIn[start], index - start - 1));
         }
-        
-        free(buffIn);
 
         // check if POST contains payload
         if (argument) {
@@ -318,8 +325,8 @@ class MeetingRoomMonitorResource {
 public:
     MeetingRoomMonitorResource() {
         // create ObjectID with custom metadata tag of '32111'
-        meetingroommonitor_object = M2MInterfaceFactory::create_object("32111");
-        M2MObjectInstance* meetingroommonitor_inst = meetingroommonitor_object->create_object_instance();
+        meetingroommonitor_obj = M2MInterfaceFactory::create_object("32111");
+        meetingroommonitor_inst = meetingroommonitor_obj->create_object_instance();
 
         // 5527 = Text
         M2MResource* current_owner_res = meetingroommonitor_inst->create_dynamic_resource("32100", "CurrentOwner",
@@ -363,20 +370,27 @@ public:
         // we allow executing a function here...
         exec_res->set_operation(M2MBase::POST_ALLOWED);
         // when a POST comes in, we want to execute the led_execute_callback
-        exec_res->set_execute_function(execute_callback(data_updated));
-        // Completion of execute function can take a time, that's why delayed response is used
-        exec_res->set_delayed_response(true);
+        exec_res->set_execute_function(execute_callback(this, &MeetingRoomMonitorResource::newdata));
     }
 
     ~MeetingRoomMonitorResource() {
     }
 
     M2MObject* get_object() {
-        return meetingroommonitor_object;
+        return meetingroommonitor_obj;
+    }
+
+    M2MObjectInstance* get_instance() {
+        return meetingroommonitor_inst;
+    }
+
+    void newdata(void* argument) {
+        data_updated(argument);
     }
 
 private:
-    M2MObject* meetingroommonitor_object;
+    M2MObject* meetingroommonitor_obj;
+    M2MObjectInstance* meetingroommonitor_inst;
 };
 
 // Entry point to the program
@@ -481,86 +495,103 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     while (true) {
         updates.wait(30000);
         if(registered) {
-            if(!clicked) {
+            if(!clicked && !new_data) {
                 mbed_client.test_update_register();
             }
-        }else {
-            break;
-        }
-        if(new_data) {
-            new_data = false;
-            display.fillScreen(0);
-            // values in mbed Client are all buffers, and we need a vector of int's
-            uint8_t* buffIn = NULL;
-            uint32_t sizeIn;
-            
-            M2MObjectInstance* inst = meetingroommonitor_resource.get_object()->object_instance();
-            M2MResource* res = inst->resource("32100");
-            
-            display.setFont(&SansSerif_plain_60);
-            display.setCursor(200,60);
-            
-            time_t timestamp= time(NULL);
-            struct tm *tmp = gmtime(&timestamp);
-            display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
-            
-            display.setFont(&SansSerif_plain_24);
-            display.setCursor(230,84);
-            display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
-            
-            display.setFont(&SansSerif_plain_24);
-            display.setCursor(0,0);
-            
-            res = inst->resource("32104");
-            res->get_value(buffIn, sizeIn);
-            display.printf("\n%s\n\n", buffIn);
-            free(buffIn);
-            
-            res = inst->resource("32103");
-            res->get_value(buffIn, sizeIn);
-            display.printf("Next:\n%s\n", buffIn);
-            free(buffIn);
-            
-            res = inst->resource("32102");
-            res->get_value(buffIn, sizeIn);
-            display.printf("%s", buffIn);
-            free(buffIn);
-            
-            display.setFont(&SansSerif_plain_36);
-            display.setCursor(80,200);
-            res = inst->resource("32101");
-            res->get_value(buffIn, sizeIn);
-            display.printf("%s", buffIn);
-            free(buffIn);
-            
-            display.setFont(&SansSerif_plain_36);
-            display.setCursor(10,236);
-            res = inst->resource("32100");
-            res->get_value(buffIn, sizeIn);
-            display.printf("%s", buffIn);
-            free(buffIn);
-            
-            display.update();
-            
-            printf("Updated\n");
-        } else {
-            // Update clock
-            display.fillRect(200,0,200,90,0);
-            display.setFont(&SansSerif_plain_60);
-            display.setCursor(200,60);
-            
-            time_t timestamp= time(NULL);
-            struct tm *tmp = gmtime(&timestamp);
-            display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
-            display.setFont(&SansSerif_plain_24);
-            display.setCursor(230,84);
-            display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
+            if(new_data) {
+	            new_data = false;
+	            display.fillScreen(0);
+	            // values in mbed Client are all buffers, and we need a vector of int's
+	            uint8_t* buffIn = NULL;
+	            uint32_t sizeIn;
+	            
+	            M2MObjectInstance* inst = meetingroommonitor_resource.get_object()->object_instance();
+                if(inst == NULL) {
+                    printf("NullErrorI\n");
+                    continue;
+                }
+	            M2MResource* res = inst->resource("32100");
+	            if(res == NULL) {
+                    printf("NullErrorR\n");
+                    continue;
+                }
+	            display.setFont(&SansSerif_plain_60);
+	            display.setCursor(200,60);
+	            
+	            time_t timestamp= time(NULL);
+	            struct tm *tmp = gmtime(&timestamp);
+	            display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
+	            
+	            display.setFont(&SansSerif_plain_24);
+	            display.setCursor(230,84);
+	            display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
+	            
+	            display.setFont(&SansSerif_plain_24);
+	            display.setCursor(0,0);
+	            
+	            res = inst->resource("32104");
+                buffIn = res->value();
+                sizeIn = res->value_length();
+                if (sizeIn > 0) {
+                    display.printf("\n%s\n\n", buffIn);
+                }
+	            
+	            res = inst->resource("32103");
+	            buffIn = res->value();
+                sizeIn = res->value_length();
+                if (sizeIn > 0) {
+                    display.printf("Next:\n%s\n", buffIn);
+                }
+	            
+	            res = inst->resource("32102");
+	            buffIn = res->value();
+                sizeIn = res->value_length();
+                if (sizeIn > 0) {
+    	            display.printf("%s", buffIn);
+                }
+	            
+	            display.setFont(&SansSerif_plain_36);
+	            display.setCursor(80,200);
+	            res = inst->resource("32101");
+	            buffIn = res->value();
+                sizeIn = res->value_length();
+                if (sizeIn > 0) {
+    	            display.printf("%s", buffIn);
+                }
+	            
+	            display.setFont(&SansSerif_plain_36);
+	            display.setCursor(10,236);
+	            res = inst->resource("32100");
+	            buffIn = res->value();
+                sizeIn = res->value_length();
+                if (sizeIn > 0) {
+    	            display.printf("%s", buffIn);
+                }
+	            
+	            display.update();
+	            
+	            printf("Updated\n");
+	        } else {
+	            // Update clock
+	            display.fillRect(200,0,200,90,0);
+	            display.setFont(&SansSerif_plain_60);
+	            display.setCursor(200,60);
+	            
+	            time_t timestamp= time(NULL);
+	            struct tm *tmp = gmtime(&timestamp);
+	            display.printf("%02d:%02d", tmp->tm_hour + 2, tmp->tm_min);
+	            display.setFont(&SansSerif_plain_24);
+	            display.setCursor(230,84);
+	            display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
 
-            display.update();
-        }
-        if(clicked) {
-            clicked = false;
-            button_resource.handle_button_click();
+	            display.update();
+	        }
+	        if(clicked) {
+	            clicked = false;
+	            button_resource.handle_button_click();
+	        }
+        } else {
+            break;
         }
     }
 

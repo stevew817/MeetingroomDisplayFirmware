@@ -117,7 +117,9 @@ int LS027B7DH01::update( ) {
             _cmd[1] = (uint8_t)SWAP8(rowCount + 1);
             memcpy((void*)&(_cmd[2]), (const void*)&(_pixelBuffer[rowCount*(DISPLAY_WIDTH/DISPLAY_BUFFER_TYPE_SIZE)]), DISPLAY_WIDTH / DISPLAY_BUFFER_TYPE_SIZE * sizeof(DISPLAY_BUFFER_TYPE));
             
-            _spi->write((const char*)_cmd, 2 + DISPLAY_WIDTH / DISPLAY_BUFFER_TYPE_SIZE * sizeof(DISPLAY_BUFFER_TYPE), NULL, 0);
+            for ( size_t index = 0; index < 2 + DISPLAY_WIDTH / DISPLAY_BUFFER_TYPE_SIZE * sizeof(DISPLAY_BUFFER_TYPE); index++) {
+                _spi->write(_cmd[index]);
+            }
 
             // Transaction is done
             _dirtyRows[rowCount / DISPLAY_BUFFER_TYPE_SIZE] &= ~(1 << (rowCount % DISPLAY_BUFFER_TYPE_SIZE));
@@ -154,7 +156,8 @@ int LS027B7DH01::clearImmediate( ) {
 	_CS->write(1);
 	Thread::wait(20);
 
-    _spi->write((const char*)_cmd, 2, NULL, 0);
+    _spi->write(_cmd[0]);
+    _spi->write(_cmd[1]);
 
     Thread::wait(200);
     _CS->write(0);
