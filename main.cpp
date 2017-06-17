@@ -61,11 +61,11 @@ struct MbedClientDevice device = {
     "Stevew817",        // Manufacturer
     "ConfrmMonitor",    // Type
     "A00",              // ModelNumber
-    "SerialNumber_String"       // SerialNumber
+    ""                  // SerialNumber will be filled out later with MAC address
 };
 
 // Instantiate the class which implements LWM2M Client API (from simpleclient.h)
-MbedClient mbed_client(device);
+MbedClient mbed_client;
 
 // Keep the mbed client example's button object
 InterruptIn obs_button(SW1);
@@ -580,9 +580,22 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     // Create endpoint interface to manage register and unregister
     mbed_client.create_interface(MBED_SERVER_ADDRESS, network);
 
+    // Get MAC address as serial number
+    uint8_t mac[8];
+    rf_phy.get_mac_address(mac);
+    char macstring[24];
+    for(size_t i = 0; i < sizeof(mac); i++) {
+        macstring[i*3] = (mac[i] >> 4) > 0x9 ? (mac[i] >> 4) + 0x37 : (mac[i] >> 4) + 0x30;
+        macstring[i*3 + 1] = (mac[i] & 0x0F) > 0x9 ? (mac[i] & 0x0F) + 0x37 : (mac[i] & 0x0F) + 0x30;
+        if (i < (sizeof(mac) - 1)) {
+            macstring[i*3 + 2] = ':';
+        }
+    }
+    device.SerialNumber = (const char*)macstring;
+
     // Create Objects of varying types, see simpleclient.h for more details on implementation.
     M2MSecurity* register_object = mbed_client.create_register_object(); // server object specifying connector info
-    M2MDevice*   device_object   = mbed_client.create_device_object();   // device resources object
+    M2MDevice*   device_object   = mbed_client.create_device_object(&device);   // device resources object
 
     // Create list of Objects to register
     M2MObjectList object_list;

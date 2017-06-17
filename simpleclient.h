@@ -90,7 +90,7 @@ class MbedClient: public M2MInterfaceObserver {
 public:
 
     // constructor for MbedClient object, initialize private variables
-    MbedClient(struct MbedClientDevice device) {
+    MbedClient() {
         _interface = NULL;
         _bootstrapped = false;
         _error = false;
@@ -99,7 +99,6 @@ public:
         _register_security = NULL;
         _value = 0;
         _object = NULL;
-        _device = device;
     }
 
     // de-constructor for MbedClient object, you can ignore this
@@ -132,7 +131,7 @@ public:
     _interface = M2MInterfaceFactory::create_interface(*this,
                                                       MBED_ENDPOINT_NAME,       // endpoint name string
                                                       "test",                   // endpoint type string
-                                                      100,                      // lifetime
+                                                      3600,                      // lifetime
                                                       port,                     // listen port
                                                       MBED_DOMAIN,              // domain string
                                                       SOCKET_MODE,              // binding mode
@@ -187,16 +186,16 @@ public:
     * Creates device object which contains mandatory resources linked with
     * device endpoint.
     */
-    M2MDevice* create_device_object() {
+    M2MDevice* create_device_object(struct MbedClientDevice *deviceInfo) {
         // create device objectID/ObjectInstance
         M2MDevice *device = M2MInterfaceFactory::create_device();
         // make sure device object was created successfully
         if(device) {
             // add resourceID's to device objectID/ObjectInstance
-            device->create_resource(M2MDevice::Manufacturer, _device.Manufacturer);
-            device->create_resource(M2MDevice::DeviceType, _device.Type);
-            device->create_resource(M2MDevice::ModelNumber, _device.ModelNumber);
-            device->create_resource(M2MDevice::SerialNumber, _device.SerialNumber);
+            device->create_resource(M2MDevice::Manufacturer, deviceInfo->Manufacturer);
+            device->create_resource(M2MDevice::DeviceType, deviceInfo->Type);
+            device->create_resource(M2MDevice::ModelNumber, deviceInfo->ModelNumber);
+            device->create_resource(M2MDevice::SerialNumber, deviceInfo->SerialNumber);
         }
         return device;
     }
@@ -259,7 +258,7 @@ public:
         *  mbed client stack. This print statement is turned off because it
         *  tends to happen alot.
         */
-        //trace_printer("\r\nRegistration Updated\r\n");
+        trace_printer("\r\nRegistration Updated\r\n");
     }
 
     // Callback from mbed client stack if any error is encountered
@@ -357,7 +356,7 @@ private:
     volatile bool            _registered;
     volatile bool            _unregistered;
     int                      _value;
-    struct MbedClientDevice  _device;
+    struct MbedClientDevice  *_device;
     String                   _server_address;
 };
 
