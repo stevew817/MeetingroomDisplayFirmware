@@ -29,6 +29,9 @@
 #include "SansSerifPlain_48.h"
 #include "SansSerifPlain_36.h"
 #include "SansSerifPlain_24.h"
+#include "microSansSerif24.h"
+#include "microSansSerif16.h"
+#include "microSansSerif12.h"
 
 #include "mbed.h"
 
@@ -528,7 +531,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     srand(seed);
     red_led = LED_OFF;
     
-    displaySPI.frequency(1000000);
+    displaySPI.frequency(5000000);
     display.clearImmediate();
 
     status_ticker.attach_us(blinky, 250000);
@@ -613,92 +616,50 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     mbed_client.test_register(register_object, object_list);
     registered = true;
 
+    // Set initial display state
     display.fillScreen(0);
-    // values in mbed Client are all buffers, and we need a vector of int's
-    uint8_t* buffIn = NULL;
-    uint32_t sizeIn;
-    
-    M2MObjectInstance* inst = meetingroommonitor_resource.get_object()->object_instance();
-    M2MResource* res = inst->resource("32100");
     display.setFont(&SansSerif_plain_60);
-    display.setCursor(200,60);
+    display.setCursor(220,60);
     
     time_t timestamp= time(NULL);
+    timestamp += 60*60*2;
     struct tm *tmp = gmtime(&timestamp);
     display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
     
-    display.setFont(&SansSerif_plain_24);
-    display.setCursor(230,84);
+    display.setFont(&micross12pt8b);
+    display.setCursor(250,84);
     display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
     
-    display.setFont(&SansSerif_plain_24);
-    display.setCursor(0,24);
-    
-    res = inst->resource("32104");
-    buffIn = res->value();
-    sizeIn = res->value_length();
-    if (sizeIn > 0) {
-        display.printf("%s", buffIn);
-    }
-    
-    res = inst->resource("32103");
-    buffIn = res->value();
-    sizeIn = res->value_length();
+    display.setFont(&micross12pt8b);
     display.setCursor(0,72);
-    if (sizeIn > 0) {
-        display.printf("Next:\n%s", buffIn);
-    }
-    
-    res = inst->resource("32102");
-    display.setCursor(0,120);
-    buffIn = res->value();
-    sizeIn = res->value_length();
-    if (sizeIn > 0) {
-        display.printf("%s", buffIn);
-    }
-    
-    display.setFont(&SansSerif_plain_36);
-    display.setCursor(80,200);
-    res = inst->resource("32101");
-    buffIn = res->value();
-    sizeIn = res->value_length();
-    if (sizeIn > 0) {
-        display.printf("%s", buffIn);
-    }
-    
-    display.setFont(&SansSerif_plain_36);
-    display.setCursor(10,236);
-    res = inst->resource("32100");
-    buffIn = res->value();
-    sizeIn = res->value_length();
-    if (sizeIn > 0) {
-        display.printf("%s", buffIn);
-    }
-    
+    display.printf("Next:");
     display.update();
 
     while (registered) {
         osEvent event = evqueue.get(15000);
         if(event.status == (osStatus)osEventMessage) {
+            int16_t ulx, uly;
+            uint16_t w, h;
             ProgramEvent_t* evPtr = (ProgramEvent_t*)event.value.p;
             switch(evPtr->event) {
                 case TIME_UPDATE:
                     // Update clock
-                    display.fillRect(200,0,200,90,0);
+                    display.fillRect(220,0,180,90,0);
                     display.setFont(&SansSerif_plain_60);
-                    display.setCursor(200,60);
+                    display.setCursor(220,60);
                     
                     timestamp= time(NULL);
+                    timestamp += 60*60*2;
                     tmp = gmtime(&timestamp);
-                    display.printf("%02d:%02d", tmp->tm_hour + 2, tmp->tm_min);
-                    display.setFont(&SansSerif_plain_24);
-                    display.setCursor(230,84);
+                    display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
+                    display.setFont(&micross12pt8b);
+                    display.setCursor(250,84);
                     display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
 
                     display.update();
                     break;
                 case ROOM_UPDATE:
-                    display.setFont(&SansSerif_plain_24);
+                    display.setFont(&micross16pt8b);
                     display.setCursor(0,30);
                     display.fillRect(0,30-24,200,24,0);
                     display.printf("%s", evPtr->data);
@@ -707,36 +668,51 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
                     printf("Updated room name\n");
                     break;
                 case CUR_OWNER_UPDATE:
-                    display.setFont(&SansSerif_plain_36);
-                    display.setCursor(10,236);
-                    display.fillRect(10,236-36,390,36,0);
+                    display.setFont(&micross24pt8b);
+                    display.getTextBounds((const char*)evPtr->data, 0, 240-11, &ulx, &uly, &w, &h);
+                    if(w >= 400) {
+                        //String won't fit...
+                        ulx = 0;
+                    } else {
+                        ulx = (400 - w) / 2;
+                    }
+                    display.setCursor(ulx,240-11);
+                    display.fillRect(0,240-54,400,54,0);
                     display.printf("%s", evPtr->data);
                     free(evPtr->data);
                     display.update();
                     printf("Updated current owner\n");
                     break;
                 case CUR_TIME_UPDATE:
-                    display.setFont(&SansSerif_plain_36);
-                    display.setCursor(80,200);
-                    display.fillRect(80,200-36,320,36,0);
+                    display.setFont(&micross24pt8b);
+                    display.getTextBounds((const char*)evPtr->data, 0, 240-11, &ulx, &uly, &w, &h);
+                    if(w >= 400) {
+                        //String won't fit...
+                        ulx = 0;
+                    } else {
+                        ulx = (400 - w) / 2;
+                    }
+                    display.setCursor(ulx,240-4-54);
+                    display.fillRect(0,240-54-40,400,40,0);
                     display.printf("%s", evPtr->data);
                     free(evPtr->data);
                     display.update();
                     printf("Updated current slot\n");
                     break;
                 case NEXT_OWNER_UPDATE:
-                    display.setFont(&SansSerif_plain_24);
-                    display.setCursor(0,120);
-                    display.fillRect(0,120-24,400,24,0);
+                    display.setFont(&micross16pt8b);
+                    display.setCursor(0,142-7-6);
+                    display.fillRect(0,142-35-6,400,35,0);
                     display.printf("%s", evPtr->data);
                     free(evPtr->data);
                     display.update();
                     printf("Updated next owner\n");
                     break;
                 case NEXT_TIME_UPDATE:
-                    display.setFont(&SansSerif_plain_24);
-                    display.setCursor(0,96);
-                    display.fillRect(0,96-24,400,24,0);
+                    display.setFont(&micross16pt8b);
+                    display.setCursor(0,142-7-35);
+                    // Numbers: [22,-1]
+                    display.fillRect(0,142-35-7-22,400,28,0);
                     display.printf("%s", evPtr->data);
                     free(evPtr->data);
                     display.update();
@@ -753,15 +729,16 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
             free(evPtr);
         }
         // Update clock
-        display.fillRect(200,0,200,90,0);
+        display.fillRect(220,0,180,90,0);
         display.setFont(&SansSerif_plain_60);
-        display.setCursor(200,60);
+        display.setCursor(220,60);
         
-        timestamp= time(NULL);
+        timestamp = time(NULL);
+        timestamp += 60*60*2; //Static offset for GMT+2, placeholder for actual timezone setting
         tmp = gmtime(&timestamp);
-        display.printf("%02d:%02d", tmp->tm_hour + 2, tmp->tm_min);
-        display.setFont(&SansSerif_plain_24);
-        display.setCursor(230,84);
+        display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
+        display.setFont(&micross12pt8b);
+        display.setCursor(250,84);
         display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
 
         display.update();
