@@ -131,7 +131,7 @@ public:
     _interface = M2MInterfaceFactory::create_interface(*this,
                                                       MBED_ENDPOINT_NAME,       // endpoint name string
                                                       "test",                   // endpoint type string
-                                                      3600,                      // lifetime
+                                                      100,                      // lifetime
                                                       port,                     // listen port
                                                       MBED_DOMAIN,              // domain string
                                                       SOCKET_MODE,              // binding mode

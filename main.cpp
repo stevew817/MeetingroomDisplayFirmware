@@ -377,14 +377,6 @@ public:
         // set initial owner
         roomname_res->set_value((const uint8_t*)"Uninit", 7);
         roomname_res->set_value_updated_function(value_updated_callback(this, &MeetingRoomMonitorResource::update_roomname));
-
-        // there's not really an execute LWM2M ID that matches... hmm...
-        M2MResource* exec_res = meetingroommonitor_inst->create_dynamic_resource("5850", "Update",
-            M2MResourceInstance::OPAQUE, false);
-        // we allow executing a function here...
-        exec_res->set_operation(M2MBase::POST_ALLOWED);
-        // when a POST comes in, we want to execute the led_execute_callback
-        // exec_res->set_execute_function(execute_callback(this, &MeetingRoomMonitorResource::newdata));
     }
 
     ~MeetingRoomMonitorResource() {
@@ -403,14 +395,31 @@ public:
         if (event == NULL) return;
 
         size_t length = current_owner_res->value_length() + 1;
-        void* dataPtr = malloc(length);
+        char* dataPtr = (char*)malloc(length);
         if (dataPtr == NULL) {
             free((void*)event);
             return;
         }
 
         memcpy(dataPtr, current_owner_res->value(), length);
-        ((char*)dataPtr)[length-1] = 0x00;
+
+        for(size_t i = 0;i < length; i++) {
+            // Convert specific UTF8 into character point (up to U+00FF)
+            if(dataPtr[i] == 0xC2) {
+                length--;
+                for(size_t j = i; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            } else if (dataPtr[i] == 0xC3) {
+                length--;
+                dataPtr[i] = dataPtr[i+1] + 0x40;
+                for(size_t j = i+1; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            }
+        }
+        
+        dataPtr[length-1] = 0x00;
 
         event->event = CUR_OWNER_UPDATE;
         event->data = dataPtr;
@@ -460,14 +469,30 @@ public:
         if (event == NULL) return;
 
         size_t length = next_owner_res->value_length() + 1;
-        void* dataPtr = malloc(length);
+        char* dataPtr = (char*)malloc(length);
         if (dataPtr == NULL) {
             free((void*)event);
             return;
         }
 
         memcpy(dataPtr, next_owner_res->value(), length);
-        ((char*)dataPtr)[length-1] = 0x00;
+
+        for(size_t i = 0;i < length; i++) {
+            // Convert specific UTF8 into character point (up to U+00FF)
+            if(dataPtr[i] == 0xC2) {
+                length--;
+                for(size_t j = i; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            } else if (dataPtr[i] == 0xC3) {
+                length--;
+                dataPtr[i] = dataPtr[i+1] + 0x40;
+                for(size_t j = i+1; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            }
+        }
+        dataPtr[length-1] = 0x00;
 
         event->event = NEXT_OWNER_UPDATE;
         event->data = dataPtr;
@@ -479,14 +504,31 @@ public:
         if (event == NULL) return;
 
         size_t length = roomname_res->value_length() + 1;
-        void* dataPtr = malloc(length);
+        char* dataPtr = (char*)malloc(length);
         if (dataPtr == NULL) {
             free((void*)event);
             return;
         }
 
         memcpy(dataPtr, roomname_res->value(), length);
-        ((char*)dataPtr)[length-1] = 0x00;
+
+        for(size_t i = 0;i < length; i++) {
+            // Convert specific UTF8 into character point (up to U+00FF)
+            if(dataPtr[i] == 0xC2) {
+                length--;
+                for(size_t j = i; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            } else if (dataPtr[i] == 0xC3) {
+                length--;
+                dataPtr[i] = dataPtr[i+1] + 0x40;
+                for(size_t j = i+1; j < length; j++) {
+                    dataPtr[j] = dataPtr[j+1];
+                }
+            }
+        }
+
+        dataPtr[length-1] = 0x00;
 
         event->event = ROOM_UPDATE;
         event->data = dataPtr;
