@@ -45,13 +45,11 @@ NanostackRfPhyEfr32 rf_phy;
 #define MBED_SERVER_ADDRESS "coaps://[2607:f0d0:2601:52::20]:5684"
 #include "simpleclient.h"
 
-#define RED_LED (LED1)
 #define GREEN_LED (LED2)		     
 #define LED_ON (0)
 #define LED_OFF (!LED_ON)
 
 // Status indication
-DigitalOut red_led(RED_LED);
 DigitalOut green_led(GREEN_LED);
 
 Ticker status_ticker;
@@ -68,16 +66,16 @@ struct MbedClientDevice device = {
 };
 
 // Instantiate the class which implements LWM2M Client API (from simpleclient.h)
-MbedClient mbed_client;
-
-// Keep the mbed client example's button object
-InterruptIn obs_button(SW1);
+static MbedClient mbed_client;
+static M2MDevice* device_object;
 
 // Network interaction must be performed outside of interrupt context
 volatile bool registered = false;
 volatile bool clicked = false;
-volatile bool new_data = false;
 osThreadId mainThread;
+
+// Offset from UTC in seconds
+static volatile int utcOffset = 0;
 
 typedef enum {
     TIME_UPDATE,
@@ -97,226 +95,28 @@ typedef struct {
 
 Queue<ProgramEvent_t, 16> evqueue;
 
-void unregister() {
-    ProgramEvent_t* event = (ProgramEvent_t*) malloc(sizeof(ProgramEvent_t));
-    if (event == NULL) return;
-    event->event = UNREGISTER;
-    evqueue.put(event);
-}
+void update_timezone(const char *argument) {
+    String tz = device_object->resource_value_string(M2MDevice::UTCOffset);
+    //Parse offset
+    if (tz == NULL) {
+        utcOffset = 0;
+    } else if (tz.length() >= 3) {
+        // Format +00, +0100 or +01:00
+        utcOffset = (tz[1] - 0x30) * 10 * 60 * 60;
+        utcOffset += (tz[2] - 0x30) * 60 * 60;
 
-void button_clicked() {
-    ProgramEvent_t* event = (ProgramEvent_t*) malloc(sizeof(ProgramEvent_t));
-    if (event == NULL) return;
-    event->event = BUTTON_CLICKED;
-    evqueue.put(event);
-}
-
-/*
- * Arguments for running "blink" in it's own thread.
- */
-class BlinkArgs {
-public:
-    BlinkArgs() {
-        clear();
-    }
-    void clear() {
-        position = 0;
-        blink_pattern.clear();
-    }
-    uint16_t position;
-    std::vector<uint32_t> blink_pattern;
-};
-
-/*
- * The Led contains one property (pattern) and a function (blink).
- * When the function blink is executed, the pattern is read, and the LED
- * will blink based on the pattern.
- */
-class LedResource {
-public:
-    LedResource() {
-        // create ObjectID with metadata tag of '3201', which is 'digital output'
-        led_object = M2MInterfaceFactory::create_object("3201");
-        M2MObjectInstance* led_inst = led_object->create_object_instance();
-
-        // 5853 = Multi-state output
-        M2MResource* pattern_res = led_inst->create_dynamic_resource("5853", "Pattern",
-            M2MResourceInstance::STRING, false);
-        // read and write
-        pattern_res->set_operation(M2MBase::GET_PUT_ALLOWED);
-        // set initial pattern (toggle every 200ms. 7 toggles in total)
-        pattern_res->set_value((const uint8_t*)"500:500:500:500:500:500:500", 27);
-
-        // there's not really an execute LWM2M ID that matches... hmm...
-        M2MResource* led_res = led_inst->create_dynamic_resource("5850", "Blink",
-            M2MResourceInstance::OPAQUE, false);
-        // we allow executing a function here...
-        led_res->set_operation(M2MBase::POST_ALLOWED);
-        // when a POST comes in, we want to execute the led_execute_callback
-        led_res->set_execute_function(execute_callback(this, &LedResource::blink));
-        // Completion of execute function can take a time, that's why delayed response is used
-        led_res->set_delayed_response(true);
-        blink_args = new BlinkArgs();
-    }
-
-    ~LedResource() {
-        delete blink_args;
-    }
-
-    M2MObject* get_object() {
-        return led_object;
-    }
-
-    int mem_atoi(const char *buf, size_t len)              // spaces, sign, digits
-    {
-            int n=0, sign=1;
-
-            while ( len && isspace(*buf) )
-                    --len, ++buf;
-
-            if ( len ) switch(*buf) {
-                    case '-':       sign=-1;        \
-                    case '+':       --len, ++buf;
-            }
-
-            while ( len-- && isdigit(*buf) )
-                    n = n*10 + *buf++ -'0';
-
-            return n*sign;
-    }
-
-    void blink(void *argument) {
-        // read the value of 'Pattern'
-        status_ticker.detach();
-        green_led = LED_OFF;
-
-        M2MObjectInstance* inst = led_object->object_instance();
-        M2MResource* res = inst->resource("5853");
-        // Clear previous blink data
-        blink_args->clear();
-
-        // values in mbed Client are all buffers, and we need a vector of int's
-        uint8_t* buffIn = res->value();
-        uint32_t sizeIn = res->value_length();
-
-        // turn the buffer into a string, and initialize a vector<int> on the heap
-        printf("led_execute_callback pattern=%s\n", buffIn);
-
-        // our pattern is something like 500:200:500, so parse that
-        // Ripped out std::String usage since it was pulling in 15k of bloat from stdlibc++
-        size_t start = 0;
-        size_t index = 0;
-        while(index < sizeIn) {
-            if(buffIn[index] == ':') {
-                if(index == 0) {
-                    start = 1;
-                } else {
-                    blink_args->blink_pattern.push_back(mem_atoi((const char*)&buffIn[start], index - start - 1));
-                    start = index + 1;
-                }
-            }
-            index++;
-        }
-        if (start < index) {
-            blink_args->blink_pattern.push_back(mem_atoi((const char*)&buffIn[start], index - start - 1));
-        }
-
-        // check if POST contains payload
-        if (argument) {
-            M2MResource::M2MExecuteParameter* param = (M2MResource::M2MExecuteParameter*)argument;
-            String object_name = param->get_argument_object_name();
-            uint16_t object_instance_id = param->get_argument_object_instance_id();
-            String resource_name = param->get_argument_resource_name();
-            int payload_length = param->get_argument_value_length();
-            const uint8_t* payload = param->get_argument_value();
-            printf("Resource: %s/%d/%s executed\n", object_name.c_str(), object_instance_id, resource_name.c_str());
-            printf("Payload: %.*s\n", payload_length, payload);
-        }
-        // do_blink is called with the vector, and starting at -1
-        blinky_thread.start(callback(this, &LedResource::do_blink));
-    }
-
-private:
-    M2MObject* led_object;
-    Thread blinky_thread;
-    BlinkArgs *blink_args;
-    void do_blink() {
-        for (;;) {
-            // blink the LED
-            red_led = !red_led;
-            // up the position, if we reached the end of the vector
-            if (blink_args->position >= blink_args->blink_pattern.size()) {
-                // send delayed response after blink is done
-                M2MObjectInstance* inst = led_object->object_instance();
-                M2MResource* led_res = inst->resource("5850");
-                led_res->send_delayed_post_response();
-                red_led = LED_OFF;
-                status_ticker.attach_us(blinky, 250000);
-                return;
-            }
-            // Wait requested time, then continue prosessing the blink pattern from next position.
-            Thread::wait(blink_args->blink_pattern.at(blink_args->position));
-            blink_args->position++;
-        }
-    }
-};
-
-/*
- * The button contains one property (click count).
- * When `handle_button_click` is executed, the counter updates.
- */
-class ButtonResource {
-public:
-    ButtonResource(): counter(0) {
-        // create ObjectID with metadata tag of '3200', which is 'digital input'
-        btn_object = M2MInterfaceFactory::create_object("3200");
-        M2MObjectInstance* btn_inst = btn_object->create_object_instance();
-        // create resource with ID '5501', which is digital input counter
-        M2MResource* btn_res = btn_inst->create_dynamic_resource("5501", "Button",
-            M2MResourceInstance::INTEGER, true /* observable */);
-        // we can read this value
-        btn_res->set_operation(M2MBase::GET_ALLOWED);
-        // set initial value (all values in mbed Client are buffers)
-        // to be able to read this data easily in the Connector console, we'll use a string
-        btn_res->set_value((uint8_t*)"0", 1);
-    }
-
-    ~ButtonResource() {
-    }
-
-    M2MObject* get_object() {
-        return btn_object;
-    }
-
-    /*
-     * When you press the button, we read the current value of the click counter
-     * from mbed Device Connector, then up the value with one.
-     */
-    void handle_button_click() {
-        if (mbed_client.register_successful()) {
-            M2MObjectInstance* inst = btn_object->object_instance();
-            M2MResource* res = inst->resource("5501");
-
-            // up counter
-            counter++;
-    #ifdef TARGET_K64F
-            printf("handle_button_click, new value of counter is %d\n", counter);
-    #else
-            printf("simulate button_click, new value of counter is %d\n", counter);
-    #endif
-            // serialize the value of counter as a string, and tell connector
-            char buffer[20];
-            int size = sprintf(buffer,"%d",counter);
-            res->set_value((uint8_t*)buffer, size);
+        if (tz.length() <= 5) {
+            utcOffset += (tz[3] - 0x30) * 30 * 60;
+            utcOffset += (tz[4] - 0x30) * 60;
         } else {
-            printf("simulate button_click, device not registered\n");
+            utcOffset += (tz[4] - 0x30) * 30 * 60;
+            utcOffset += (tz[5] - 0x30) * 60;
+        }
+        if (tz[0] == '-') {
+            utcOffset *= -1;
         }
     }
-
-private:
-    M2MObject* btn_object;
-    uint16_t counter;
-};
+}
 
 /*
  * The Meeting Room Monitor contains properties and a refresh function.
@@ -571,7 +371,6 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
 #endif
 
     srand(seed);
-    red_led = LED_OFF;
     
     displaySPI.frequency(5000000);
     display.clearImmediate();
@@ -615,12 +414,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     set_time(ts);
 
     // we create our LWM2M resources
-    ButtonResource button_resource;
-    LedResource led_resource;
     MeetingRoomMonitorResource meetingroommonitor_resource;
-
-    // Observation Button (SW2) press will send update of endpoint resource values to connector
-    obs_button.fall(&button_clicked);
 
     // Create endpoint interface to manage register and unregister
     mbed_client.create_interface(MBED_SERVER_ADDRESS, network);
@@ -640,15 +434,15 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
 
     // Create Objects of varying types, see simpleclient.h for more details on implementation.
     M2MSecurity* register_object = mbed_client.create_register_object(); // server object specifying connector info
-    M2MDevice*   device_object   = mbed_client.create_device_object(&device);   // device resources object
+    device_object   = mbed_client.create_device_object(&device);   // device resources object
+    M2MResource* offsetresource = device_object->create_resource(M2MDevice::UTCOffset, "+00"); // Default to UTC
+    offsetresource->set_value_updated_function(update_timezone);
 
     // Create list of Objects to register
     M2MObjectList object_list;
 
     // Add objects to list
     object_list.push_back(device_object);
-    object_list.push_back(button_resource.get_object());
-    object_list.push_back(led_resource.get_object());
     object_list.push_back(meetingroommonitor_resource.get_object());
 
     // Set endpoint registration object
@@ -664,7 +458,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
     display.setCursor(220,60);
     
     time_t timestamp= time(NULL);
-    timestamp += 60*60*2;
+    timestamp += utcOffset; //apply timezone setting
     struct tm *tmp = gmtime(&timestamp);
     display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
     
@@ -691,7 +485,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
                     display.setCursor(220,60);
                     
                     timestamp= time(NULL);
-                    timestamp += 60*60*2;
+                    timestamp += utcOffset; //apply timezone setting
                     tmp = gmtime(&timestamp);
                     display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
                     display.setFont(&micross12pt8b);
@@ -761,7 +555,6 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
                     printf("Updated next slot\n");
                     break;
                 case BUTTON_CLICKED:
-                    button_resource.handle_button_click();
                     break;
                 case UNREGISTER:
                     registered = false;
@@ -770,20 +563,36 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
             }
             free(evPtr);
         }
+
         // Update clock
         display.fillRect(220,0,180,90,0);
         display.setFont(&SansSerif_plain_60);
         display.setCursor(220,60);
         
         timestamp = time(NULL);
-        timestamp += 60*60*2; //Static offset for GMT+2, placeholder for actual timezone setting
+        timestamp += utcOffset; //apply timezone setting
         tmp = gmtime(&timestamp);
         display.printf("%02d:%02d", tmp->tm_hour, tmp->tm_min);
         display.setFont(&micross12pt8b);
         display.setCursor(250,84);
         display.printf("%02d/%02d/%02d", tmp->tm_mday, tmp->tm_mon + 1, tmp->tm_year%100);
-
         display.update();
+
+        // Try to sync with NTP every Sunday night at 4AM. This should capture DST changes
+        if( tmp->tm_hour == 4
+            && tmp->tm_min == 0
+            && tmp->tm_wday == 0) {
+            ts = ntp.get_timestamp();
+            while(ts <= 0) {
+                ts = ntp.get_timestamp();
+                if (ts < 0) {
+                    printf("An error occurred when getting the time. Code: %ld\r\n", ts);
+                }
+                wait(5.0);
+            }
+            printf("Current time is %s\r\n", ctime(&ts));
+            set_time(ts);
+        }
     }
 
     mbed_client.test_unregister();

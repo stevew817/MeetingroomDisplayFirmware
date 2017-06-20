@@ -98,7 +98,6 @@ public:
         _unregistered = false;
         _register_security = NULL;
         _value = 0;
-        _object = NULL;
     }
 
     // de-constructor for MbedClient object, you can ignore this
@@ -350,7 +349,6 @@ private:
     */
     M2MInterface    	     *_interface;
     M2MSecurity              *_register_security;
-    M2MObject                *_object;
     volatile bool            _bootstrapped;
     volatile bool            _error;
     volatile bool            _registered;
