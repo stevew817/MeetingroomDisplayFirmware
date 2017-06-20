@@ -105,10 +105,10 @@ void update_timezone(const char *argument) {
         utcOffset = (tz[1] - 0x30) * 10 * 60 * 60;
         utcOffset += (tz[2] - 0x30) * 60 * 60;
 
-        if (tz.length() <= 5) {
+        if (tz.length() == 5) {
             utcOffset += (tz[3] - 0x30) * 30 * 60;
             utcOffset += (tz[4] - 0x30) * 60;
-        } else {
+        } else if (tz.length() > 5) {
             utcOffset += (tz[4] - 0x30) * 30 * 60;
             utcOffset += (tz[5] - 0x30) * 60;
         }
