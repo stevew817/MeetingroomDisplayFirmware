@@ -54,6 +54,17 @@ NanostackRfPhyEfr32 rf_phy;
 DigitalOut red_led(RED_LED);
 DigitalOut green_led(GREEN_LED);
 
+// User warning
+DigitalOut LED0_COM(PI0);
+DigitalOut LED1_COM(PI1);
+DigitalOut LED2_COM(PI2);
+DigitalOut LED3_COM(PI3);
+
+DigitalOut LED_RGB_RED(PD11);
+DigitalOut LED_RGB_GREEN(PD12);
+DigitalOut LED_RGB_BLUE(PD13);
+
+
 Ticker status_ticker;
 void blinky() {
     green_led = !green_led;
@@ -324,10 +335,11 @@ private:
  * need to do it on every property update
  */
  
-mbed::DigitalOut CS(PC9);
-mbed::DigitalOut EXTCOM(PC7);
+mbed::DigitalOut CS(PA6);
+mbed::DigitalOut EXTCOM(PA7);
+mbed::DigitalOut DISP_EN(PF6);
  
-mbed::SPI displaySPI(PC6, NC, PC8);
+mbed::SPI displaySPI(PA8, NC, PA9);
 silabs::LS027B7DH01 display(&displaySPI, &CS, &EXTCOM);
 
 class MeetingRoomMonitorResource {
@@ -572,6 +584,7 @@ Add MBEDTLS_NO_DEFAULT_ENTROPY_SOURCES and MBEDTLS_TEST_NULL_ENTROPY in mbed_app
 
     srand(seed);
     red_led = LED_OFF;
+    DISP_EN = 1;
     
     displaySPI.frequency(5000000);
     display.clearImmediate();
